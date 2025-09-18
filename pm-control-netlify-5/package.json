@@ -1,0 +1,19 @@
+{
+  "name": "pm-control-netlify",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "netlify dev",
+    "start": "netlify dev",
+  "deploy": "netlify deploy --prod --dir=public --functions=functions",
+    "lint": "echo \"No linter configured\"",
+    "check": "node -e \"console.log(\"node:\",process.version)\""
+  },
+  "dependencies": {
+    "@netlify/blobs": "^6.5.0"
+  }
+}

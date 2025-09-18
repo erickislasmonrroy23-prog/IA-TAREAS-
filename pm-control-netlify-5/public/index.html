@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PM Control & Seguimiento</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://unpkg.com/mammoth@1.6.0/mammoth.browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="mb-6">
+      <h1 class="text-3xl font-bold">Control de Actividades – Hospital Punta Médica</h1>
+      <p class="text-sm text-slate-600">CRUD + Filtros + CSV + Gantt + Upload Doc → IA + Self-check</p>
+      <div id="apiBaseBanner" class="text-xs mt-2"></div>
+    </header>
+
+    <section class="mb-4 p-4 bg-white rounded-xl shadow">
+      <h2 class="font-semibold mb-2">Comprobación rápida</h2>
+      <div class="flex flex-wrap gap-2 text-sm">
+        <a class="underline text-indigo-700" href="/.netlify/functions/hello" target="_blank">/.netlify/functions/hello</a>
+        <a class="underline text-indigo-700" href="/.netlify/functions/activities" target="_blank">/.netlify/functions/activities</a>
+        <a class="underline text-indigo-700" href="/api/activities" target="_blank">/api/activities (redirect)</a>
+      </div>
+    </section>
+
+    <section class="mb-8 p-4 bg-white rounded-xl shadow">
+      <h2 class="text-xl font-semibold mb-3">Nueva actividad</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input id="date" class="border rounded p-2" type="date">
+        <input id="area" class="border rounded p-2" placeholder="Área (Finanzas, Operación, Comercial, TI)">
+        <input id="title" class="border rounded p-2" placeholder="Título (ej. Validar cargos del día)">
+        <textarea id="steps" class="border rounded p-2 md:col-span-3" placeholder="Pasos (1) ... (2) ... (3) ..."></textarea>
+        <input id="expected" class="border rounded p-2 md:col-span-2" placeholder="Resultado esperado">
+        <input id="reviewer" class="border rounded p-2" placeholder="Revisado por">
+        <input id="evidence" class="border rounded p-2 md:col-span-2" placeholder="Evidencia (ruta/enlace)">
+        <input id="comments" class="border rounded p-2" placeholder="Comentarios">
+        <select id="status" class="border rounded p-2">
+          <option>Planificado</option><option>En curso</option><option>Hecho</option>
+        </select>
+        <input id="start" class="border rounded p-2" type="date" title="Inicio (para Gantt)">
+        <input id="end" class="border rounded p-2" type="date" title="Fin (para Gantt)">
+      </div>
+      <div class="mt-3">
+        <button id="btnSave" class="px-4 py-2 bg-indigo-600 text-white rounded">Guardar</button>
+      </div>
+    </section>
+
+    <section class="mb-4 p-4 bg-white rounded-xl shadow">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <div><label class="text-xs text-slate-600">Filtrar por área</label>
+          <select id="fArea" class="border rounded p-2 w-full"><option value="">(Todas)</option></select></div>
+        <div><label class="text-xs text-slate-600">Filtrar por estatus</label>
+          <select id="fStatus" class="border rounded p-2 w-full">
+            <option value="">(Todos)</option><option>Planificado</option><option>En curso</option><option>Hecho</option></select></div>
+        <div><label class="text-xs text-slate-600">Buscar (título/pasos)</label>
+          <input id="fSearch" class="border rounded p-2 w-full" placeholder="texto..."></div>
+        <div class="flex gap-2"><button id="btnApplyFilters" class="px-3 py-2 bg-slate-800 text-white rounded w-full">Aplicar filtros</button></div>
+        <div class="flex gap-2"><button id="btnExport" class="px-3 py-2 bg-emerald-600 text-white rounded w-full">Exportar CSV</button></div>
+      </div>
+    </section>
+
+    <section class="mb-8 p-4 bg-white rounded-xl shadow">
+      <div class="flex justify-between items-center">
+        <h2 class="text-xl font-semibold">Vista Gantt (básica)</h2>
+        <div class="text-xs text-slate-500">Usa los campos Inicio/Fin al crear actividades</div>
+      </div>
+      <div id="gantt" class="mt-3 overflow-x-auto"></div>
+    </section>
+
+    <section class="mb-8 p-4 bg-white rounded-xl shadow">
+      <div class="flex justify-between items-center">
+        <h2 class="text-xl font-semibold">Actividades</h2>
+        <button id="btnReload" class="px-3 py-1 border rounded">Recargar</button>
+      </div>
+      <table class="w-full mt-3 text-sm">
+        <thead><tr class="text-left">
+          <th class="p-2">Fecha</th><th class="p-2">Área</th><th class="p-2">Título</th><th class="p-2">Estado</th><th class="p-2">Acciones</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+
+    <section class="mb-8 p-4 bg-white rounded-xl shadow">
+      <h2 class="text-xl font-semibold mb-3">Subir documento y generar tareas (PDF / DOCX / XLSX / PPTX*)</h2>
+      <p class="text-xs text-slate-500 mb-2">*Para PPTX complejo, conviene convertir a PDF.</p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input id="fileInput" class="border rounded p-2 md:col-span-2" type="file" accept=".pdf,.docx,.xlsx,.pptx,.csv,.txt">
+        <button id="btnParse" class="px-4 py-2 bg-indigo-600 text-white rounded">Analizar documento</button>
+      </div>
+      <div class="mt-3">
+        <label class="text-xs text-slate-600">Texto detectado (editable antes de enviar a IA)</label>
+        <textarea id="parsedText" class="border rounded p-2 w-full h-40"></textarea>
+      </div>
+      <div class="mt-3 flex gap-2">
+        <button id="btnGenTasks" class="px-4 py-2 bg-emerald-600 text-white rounded">Generar tareas con IA</button>
+        <button id="btnCreateActivities" class="px-4 py-2 bg-slate-800 text-white rounded">Crear actividades</button>
+      </div>
+      <pre id="tasksOut" class="mt-3 bg-slate-100 p-3 rounded text-xs whitespace-pre-wrap"></pre>
+    </section>
+
+    <section class="mb-8 p-4 bg-white rounded-xl shadow">
+      <h2 class="text-xl font-semibold mb-3">Copiloto IA</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <textarea id="iaPrompt" class="border rounded p-2 md:col-span-2" placeholder="Pide: Checklist de cargos en < 1 hora, plan de acción, minuta, etc."></textarea>
+        <button id="btnIA" class="px-4 py-2 bg-emerald-600 text-white rounded">Sugerir</button>
+      </div>
+      <pre id="iaOut" class="mt-3 bg-slate-100 p-3 rounded text-xs whitespace-pre-wrap"></pre>
+      <p class="text-xs text-slate-500 mt-2">Configura <code>OPENAI_API_KEY</code> en Netlify → Site settings → Environment.</p>
+    </section>
+
+    <section class="mb-8 p-4 bg-white rounded-xl shadow">
+      <h2 class="text-xl font-semibold mb-3">Autodiagnóstico (Self-check)</h2>
+      <p class="text-sm text-slate-600 mb-2">Verifica en 10 segundos si el backend está listo.</p>
+      <div class="flex gap-2 mb-3">
+        <button id="btnSelfCheck" class="px-4 py-2 bg-blue-600 text-white rounded">Ejecutar Self-check</button>
+        <span id="scStatus" class="text-sm"></span>
+      </div>
+      <div id="scResults" class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm"></div>
+    </section>
+
+    <footer class="text-xs text-slate-500">© 2025 Punta Médica — Netlify ready</footer>
+  </div>
+
+<script type="module">
+const API_BASES = ["/api", "/.netlify/functions"];
+async function detectBase(){
+  for (const base of API_BASES){
+    try{
+      const r = await fetch(base + "/hello");
+      if (r.ok || r.status === 404) return base;
+    }catch(e){}
+  }
+  return null;
+}
+
+let API_BASE = null;
+(async () => {
+  API_BASE = await detectBase();
+  document.getElementById("apiBaseBanner").textContent = API_BASE
+    ? "API detectada en: " + API_BASE
+    : "No se detectó API. Verifica el deploy con Functions (CLI o repo).";
+})();
+
+async function smartFetch(path, init) {
+  const bases = API_BASE ? [API_BASE] : API_BASES;
+  let lastErr;
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}${path}`, init);
+      if (res.ok || res.status === 400 || res.status === 404 || res.status === 405) return res;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (lastErr) throw lastErr;
+  throw new Error("No API base reachable");
+}
+
+const API = {
+  list: () => smartFetch("/activities").then(r => r.json()),
+  create: (data) => smartFetch("/activities",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)}).then(r=>r.json()),
+  update: (id, data) => smartFetch("/activities/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)}).then(r=>r.json()),
+  remove: (id) => smartFetch("/activities/"+id,{method:"DELETE"})
+};
+
+const rows = document.getElementById("rows");
+const form = {
+  date: document.getElementById("date"),
+  area: document.getElementById("area"),
+  title: document.getElementById("title"),
+  steps: document.getElementById("steps"),
+  expected: document.getElementById("expected"),
+  reviewer: document.getElementById("reviewer"),
+  evidence: document.getElementById("evidence"),
+  comments: document.getElementById("comments"),
+  status: document.getElementById("status"),
+};
+let cache = []; let view = [];
+
+document.getElementById("btnSave").addEventListener("click", async () => {
+  const payload = {
+    date: form.date.value, area: form.area.value, title: form.title.value,
+    steps: form.steps.value, expected_result: form.expected.value, reviewer: form.reviewer.value,
+    evidence: form.evidence.value, comments: form.comments.value, status: form.status.value,
+    start: document.getElementById("start").value, end: document.getElementById("end").value
+  };
+  const saved = await API.create(payload);
+  cache.unshift(saved);
+  populateAreaFilter();
+  applyFilters();
+  Object.values(form).forEach(el => el.value = "");
+  form.status.value = "Planificado";
+  document.getElementById("start").value = "";
+  document.getElementById("end").value = "";
+});
+
+document.getElementById("btnReload").addEventListener("click", load);
+document.getElementById("btnApplyFilters").addEventListener("click", () => applyFilters());
+document.getElementById("btnExport").addEventListener("click", () => exportCSV(view.length?view:cache));
+
+load();
+
+async function load() {
+  rows.innerHTML = "<tr><td class='p-2' colspan='5'>Cargando...</td></tr>";
+  const data = await API.list();
+  cache = Array.isArray(data) ? data : [];
+  populateAreaFilter();
+  view = cache.slice();
+  renderTable(view);
+  renderGantt(view);
+}
+
+function renderTable(list){
+  rows.innerHTML = "";
+  if (!list.length) { rows.innerHTML = "<tr><td class='p-2' colspan='5'>Sin resultados.</td></tr>"; return; }
+  list.forEach(item => addRow(item));
+}
+
+function addRow(item){
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td class="p-2">${item.date||""}</td>
+    <td class="p-2">${item.area||""}</td>
+    <td class="p-2">
+      <div class="font-medium">${item.title||""}</div>
+      <div class="text-xs text-slate-500">Pasos: ${escapeHtml(item.steps||"")}</div>
+      <div class="text-xs text-slate-500">Esperado: ${escapeHtml(item.expected_result||"")}</div>
+    </td>
+    <td class="p-2">${item.status||""}</td>
+    <td class="p-2">
+      <button class="text-indigo-600 mr-2" data-edit="${item.id}">Editar</button>
+      <button class="text-rose-600" data-del="${item.id}">Borrar</button>
+    </td>
+  `;
+  rows.appendChild(tr);
+  tr.querySelector(`[data-del="${item.id}"]`).addEventListener("click", async () => {
+    if (!confirm("¿Eliminar actividad?")) return;
+    await API.remove(item.id);
+    tr.remove();
+  });
+  tr.querySelector(`[data-edit="${item.id}"]`).addEventListener("click", async () => {
+    const nuevoEstado = prompt("Nuevo estado (Planificado/En curso/Hecho):", item.status||"Planificado");
+    if (!nuevoEstado) return;
+    const updated = await API.update(item.id, { status: nuevoEstado });
+    tr.querySelector("td:nth-child(4)").textContent = updated.status;
+  });
+}
+
+function escapeHtml(s){ return (s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+
+function populateAreaFilter() {
+  const sel = document.getElementById("fArea");
+  const set = new Set();
+  cache.forEach(it => { if (it.area) set.add(it.area); });
+  const current = sel.value;
+  sel.innerHTML = '<option value="">(Todas)</option>' + Array.from(set).sort()
+    .map(a=>`<option ${current===a?'selected':''}>${a}</option>`).join('');
+}
+
+function applyFilters(){
+  const area = document.getElementById("fArea").value.trim().toLowerCase();
+  const status = document.getElementById("fStatus").value.trim().toLowerCase();
+  const q = document.getElementById("fSearch").value.trim().toLowerCase();
+  view = cache.filter(it => {
+    const okArea = !area || (it.area||"").toLowerCase() === area;
+    const okStat = !status || (it.status||"").toLowerCase() === status;
+    const okQ = !q || (it.title||"").toLowerCase().includes(q) || (it.steps||"").toLowerCase().includes(q);
+    return okArea && okStat && okQ;
+  });
+  renderTable(view);
+  renderGantt(view);
+}
+
+function exportCSV(list){
+  const cols = ["id","date","start","end","area","title","steps","expected_result","reviewer","evidence","comments","status","createdAt","updatedAt"];
+  const header = cols.join(",");
+  const rowsCsv = list.map(it => cols.map(c => {
+    let v = it[c] ?? "";
+    v = (v+"").replace(/"/g,'""');
+    return `"${v}"`;
+  }).join(","));
+  const csv = [header, ...rowsCsv].join("\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "actividades_export.csv"; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function renderGantt(list){
+  const wrap = document.getElementById("gantt");
+  const items = list.filter(it => it.start && it.end);
+  if (!items.length) { wrap.innerHTML = "<div class='text-xs text-slate-500'>No hay actividades con fechas Inicio/Fin.</div>"; return; }
+  const toDate = s => new Date(s+"T00:00:00");
+  let min=null, max=null;
+  items.forEach(it => {
+    const s = toDate(it.start); const e = toDate(it.end);
+    if (!min || s < min) min = s;
+    if (!max || e > max) max = e;
+  });
+  min = new Date(min.getTime() - 86400000);
+  max = new Date(max.getTime() + 86400000);
+  const days = Math.max(1, Math.round((max - min)/86400000));
+  let header = "<div class='flex text-xs sticky top-0 bg-white' style='min-width:800px'>";
+  for (let d=0; d<=days; d++){
+    const date = new Date(min.getTime() + d*86400000);
+    const lab = date.toISOString().slice(5,10);
+    header += `<div class='border p-1 text-center' style='width:40px'>${lab}</div>`;
+  }
+  header += "</div>";
+  let rowsHtml = "";
+  items.forEach(it => {
+    const s = toDate(it.start); const e = toDate(it.end);
+    const startOffset = Math.max(0, Math.round((s - min)/86400000));
+    const span = Math.max(1, Math.round((e - s)/86400000)+1);
+    const pad = startOffset*40;
+    const width = span*40;
+    const color = it.status==="Hecho" ? "bg-emerald-500" : it.status==="En curso" ? "bg-amber-500" : "bg-slate-400";
+    rowsHtml += `
+      <div class='flex items-center' style='min-width:800px'>
+        <div class='w-48 text-xs pr-2 truncate'><span class='font-semibold'>${it.title||"(sin título)"}</span><br><span class='text-slate-500'>${it.area||""}</span></div>
+        <div class='flex-1 relative' style='height:24px'>
+          <div class='absolute left-0 top-0 h-full' style='margin-left:${pad}px; width:${width}px'>
+            <div class='${color} h-full rounded shadow-sm' title="${it.title} (${it.start}→${it.end})"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  wrap.innerHTML = `
+    <div class='flex'>
+      <div class='w-48 text-xs font-semibold pr-2'>Actividad</div>
+      <div class='flex-1'>${header}</div>
+    </div>
+    <div>${rowsHtml}</div>
+  `;
+}
+
+const fileInput = document.getElementById("fileInput");
+const parsedText = document.getElementById("parsedText");
+const tasksOut = document.getElementById("tasksOut");
+let lastTasks = [];
+
+document.getElementById("btnParse").addEventListener("click", async () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) { alert("Selecciona un archivo"); return; }
+  const ext = (f.name.split(".").pop()||"").toLowerCase();
+  try {
+    if (ext === "pdf") {
+      const buf = await f.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+      let text = "";
+      for (let i=1; i<=pdf.numPages; i++){
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map(it => it.str).join(" ") + "\n";
+      }
+      parsedText.value = text.trim();
+    } else if (ext === "docx") {
+      const arrayBuffer = await f.arrayBuffer();
+      const result = await window.mammoth.extractRawText({arrayBuffer});
+      parsedText.value = (result.value || "").trim();
+    } else if (ext === "xlsx" || ext === "csv") {
+      const data = await f.arrayBuffer();
+      const wb = XLSX.read(data, {type:"array"});
+      const sheets = wb.SheetNames;
+      let text = "";
+      sheets.forEach(name => {
+        const ws = wb.Sheets[name];
+        text += `\n# Hoja: ${name}\n` + XLSX.utils.sheet_to_csv(ws);
+      });
+      parsedText.value = text.trim();
+    } else if (ext === "pptx") {
+      const ab = await f.arrayBuffer();
+      parsedText.value = `PPTX: ${f.name} (${Math.round(ab.byteLength/1024)} KB). Conviene convertir a PDF para extracción completa. Si hay texto de notas/diapositivas, pégalo aquí.`;
+    } else {
+      parsedText.value = await f.text();
+    }
+  } catch (e) {
+    parsedText.value = `Error al extraer texto: ${e.message}. Convierte el archivo a PDF o DOCX y vuelve a intentar.`;
+  }
+});
+
+document.getElementById("btnGenTasks").addEventListener("click", async () => {
+  const txt = parsedText.value.trim();
+  if (!txt) { alert("No hay texto para analizar"); return; }
+  const res = await smartFetch("/ai", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ prompt: txt, mode: "tasks" })
+  });
+  const data = await res.json();
+  let raw = data.text || "";
+  try {
+    const json = JSON.parse(raw);
+    lastTasks = Array.isArray(json) ? json : [];
+    tasksOut.textContent = JSON.stringify(lastTasks, null, 2);
+  } catch(e) {
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (m) {
+      try { lastTasks = JSON.parse(m[0]); tasksOut.textContent = JSON.stringify(lastTasks, null, 2); }
+      catch(e2){ tasksOut.textContent = raw; alert("No se pudo parsear JSON. Revisa el texto."); }
+    } else { tasksOut.textContent = raw; alert("No se detectó JSON. Ajusta el prompt o edita el texto."); }
+  }
+});
+
+document.getElementById("btnCreateActivities").addEventListener("click", async () => {
+  if (!lastTasks.length) { alert("Genera tareas con IA primero"); return; }
+  let ok = 0;
+  for (const t of lastTasks) {
+    const payload = {
+      title: t.title || "",
+      area: t.area || "",
+      steps: t.steps || "",
+      expected_result: t.expected_result || "",
+      comments: (t.where?`Dónde: ${t.where}. `:"") + (t.when?`Cuándo: ${t.when}. `:"") + (t.who?`Quién: ${t.who}. `:""),
+      status: t.status || "Planificado",
+      start: t.start || "",
+      end: t.end || "",
+      date: t.start || new Date().toISOString().slice(0,10)
+    };
+    const saved = await API.create(payload);
+    if (saved && saved.id) ok++;
+  }
+  await load();
+  alert(`Se crearon ${ok} actividades a partir del documento.`);
+});
+
+document.getElementById("btnIA").addEventListener("click", async () => {
+  const prompt = document.getElementById("iaPrompt").value || "Checklist de cargos correctos en < 1 hora (sábana sellada).";
+  const res = await smartFetch("/ai", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ prompt }) });
+  const data = await res.json();
+  document.getElementById("iaOut").textContent = data.text || JSON.stringify(data);
+});
+
+const scStatus = document.getElementById("scStatus");
+const scResults = document.getElementById("scResults");
+document.getElementById("btnSelfCheck").addEventListener("click", runSelfCheck);
+
+async function runSelfCheck(){
+  scStatus.textContent = "Ejecutando pruebas...";
+  scResults.innerHTML = "";
+  const results = [];
+  try{
+    const r = await smartFetch("/activities"); const ok = r.ok; const data = ok? await r.json():null;
+    results.push({name:"GET /activities", ok, detail: ok ? `OK (${Array.isArray(data)?data.length:0} items)` : `HTTP ${r.status}`});
+  }catch(e){ results.push({name:"GET /activities", ok:false, detail: e.message}); }
+  try{
+    const payload = { title:"SELF-CHECK", date:new Date().toISOString().slice(0,10), steps:"1) ping", expected_result:"Creación OK", status:"Planificado" };
+    const r = await smartFetch("/activities",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const ok = r.ok; const data = ok? await r.json():null;
+    results.push({name:"POST /activities", ok, detail: ok ? `OK (id: ${data?.id||"?"})` : `HTTP ${r.status}`});
+  }catch(e){ results.push({name:"POST /activities", ok:false, detail: e.message}); }
+  try{
+    const r = await smartFetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt:"Escribe: OK si funciono"})});
+    const ok = r.ok; const data = ok? await r.json():null; const text = (data && (data.text||"")).slice(0,120);
+    results.push({name:"POST /ai", ok, detail: ok ? `OK (${text||"sin texto"})` : `HTTP ${r.status}`});
+  }catch(e){ results.push({name:"POST /ai", ok:false, detail: e.message}); }
+  scStatus.textContent = "Listo.";
+  scResults.innerHTML = results.map(r => `
+    <div class="border rounded p-3 ${r.ok ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}">
+      <div class="font-semibold">${r.name}</div>
+      <div>${r.ok ? '✅' : '❌'} ${r.detail}</div>
+      ${!r.ok && r.name.includes('/ai') ? '<div class="text-xs text-slate-500 mt-1">¿Agregaste <code>OPENAI_API_KEY</code> en Environment?</div>' : ''}
+    </div>
+  `).join("");
+}
+</script>
+</body>
+</html>
